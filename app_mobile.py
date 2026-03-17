@@ -1,5 +1,6 @@
 import streamlit as st
 
+from beam_engine import BeamInput, calculate_beam_preliminary
 from beam_engine_steel import SteelBeamInput, calculate_steel_beam_preliminary
 from beam_engine_timber import TimberBeamInput, calculate_timber_beam_preliminary
 from system_light_engine import SystemLightInput, calculate_system_light
@@ -53,11 +54,19 @@ def get_mobile_suggestion(mode: str, material: str, status_family: str, reason: 
             if "deformabilità" in text or "da verificare" in text:
                 return "Valutare profilo più rigido."
             return "Procedere a verifica successiva."
+
         if material == "Legno":
             if "limite geometrico" in text:
                 return "Aumentare H o ridurre luce."
             if "deformabilità" in text or "da verificare" in text:
                 return "Valutare sezione più alta."
+            return "Procedere a verifica successiva."
+
+        if material == "Calcestruzzo armato":
+            if "limite geometrico" in text:
+                return "Aumentare H o ridurre luce."
+            if "da verificare" in text:
+                return "Valutare sezione più robusta."
             return "Procedere a verifica successiva."
 
     if mode == "Sistema":
@@ -158,10 +167,16 @@ st.markdown("---")
 if mode == "Trave":
     material_label = st.selectbox(
         "Materiale",
-        ["Acciaio", "Legno"],
+        ["Acciaio", "Legno", "Calcestruzzo armato"],
         key=form_key("beam_material"),
     )
-    material = "steel" if material_label == "Acciaio" else "timber"
+
+    if material_label == "Acciaio":
+        material = "steel"
+    elif material_label == "Legno":
+        material = "timber"
+    else:
+        material = "concrete"
 
     st.caption("Preset uso")
     c1, c2 = st.columns(2)
@@ -242,6 +257,9 @@ if mode == "Trave":
             key=form_key("beam_manual"),
         )
 
+    effective_max_height_mm = None
+    effective_max_height_cm = None
+
     if material == "steel":
         max_height_mm = st.number_input(
             "H max (mm)",
@@ -252,8 +270,8 @@ if mode == "Trave":
             key=form_key("beam_hmax_mm"),
         )
         effective_max_height_mm = max_height_mm if max_height_mm > 0 else None
-        effective_max_height_cm = None
-    else:
+
+    elif material == "timber":
         max_height_cm = st.number_input(
             "H max (cm)",
             min_value=0.0,
@@ -263,7 +281,17 @@ if mode == "Trave":
             key=form_key("beam_hmax_cm"),
         )
         effective_max_height_cm = max_height_cm if max_height_cm > 0 else None
-        effective_max_height_mm = None
+
+    else:
+        max_height_cm = st.number_input(
+            "H max (cm)",
+            min_value=0.0,
+            value=60.0,
+            step=5.0,
+            format="%.0f",
+            key=form_key("beam_hmax_concrete_cm"),
+        )
+        effective_max_height_cm = max_height_cm if max_height_cm > 0 else None
 
     if st.button("Calcola", type="primary", use_container_width=True, key=form_key("beam_calc")):
         try:
@@ -300,7 +328,8 @@ if mode == "Trave":
                         "Warnings": result.warnings,
                     },
                 }
-            else:
+
+            elif material == "timber":
                 result = calculate_timber_beam_preliminary(
                     TimberBeamInput(
                         span_m=span_m,
@@ -332,6 +361,58 @@ if mode == "Trave":
                         "Sezione": f"{result.section_b_cm:.0f} x {result.section_h_cm:.0f} cm",
                         "Nota": result.note,
                         "Warnings": result.warnings,
+                    },
+                }
+
+            else:
+                result = calculate_beam_preliminary(
+                    BeamInput(
+                        span_m=span_m,
+                        support_type=support_type,
+                        usage_key=usage_key,
+                        load_mode=load_mode,
+                        tributary_width_m=tributary_width_m,
+                        manual_line_load_kN_m=manual_line_load_kN_m,
+                        max_height_cm=effective_max_height_cm,
+                    )
+                )
+                warnings = list(getattr(result, "warnings", []))
+                status = getattr(result, "status", "Plausibile")
+                note = str(getattr(result, "note", ""))
+
+                status_family = classify_status_family(status, note, warnings)
+                reason = infer_governing_reason(status, note, warnings)
+                action = get_mobile_suggestion("Trave", "Calcestruzzo armato", status_family, reason)
+
+                section_name = getattr(result, "section_name", None)
+                if not section_name:
+                    b_cm = getattr(result, "section_b_cm", None)
+                    h_cm = getattr(result, "section_h_cm", None)
+                    if b_cm is not None and h_cm is not None:
+                        section_name = f"{int(round(b_cm))}x{int(round(h_cm))} cm"
+                    else:
+                        section_name = "Sezione c.a."
+
+                adopted_line_load = getattr(
+                    result,
+                    "adopted_line_load_kN_m",
+                    getattr(result, "line_load_kN_m", 0.0),
+                )
+
+                st.session_state.mobile_last_result = {
+                    "title": "Trave calcestruzzo armato",
+                    "esito": status_family,
+                    "soluzione": section_name,
+                    "motivo": reason,
+                    "azione": action,
+                    "details": {
+                        "Luce": f"{getattr(result, 'span_m', span_m):.2f} m",
+                        "Carico": f"{adopted_line_load:.2f} kN/m",
+                        "Momento": f"{getattr(result, 'max_moment_kNm', 0.0):.2f} kNm",
+                        "Taglio": f"{getattr(result, 'max_shear_kN', 0.0):.2f} kN",
+                        "Sezione": section_name,
+                        "Nota": note,
+                        "Warnings": warnings,
                     },
                 }
 
@@ -502,6 +583,9 @@ else:
         )
         slab_dead_load_kN_m2 = (concrete_thickness_cm / 100.0) * 25.0
 
+    effective_beam_max_height_mm = None
+    effective_beam_max_height_cm = None
+
     if beam_material == "steel":
         beam_max_height_mm = st.number_input(
             "H max travi",
@@ -512,7 +596,7 @@ else:
             key=form_key("sys_hmax_mm"),
         )
         effective_beam_max_height_mm = beam_max_height_mm if beam_max_height_mm > 0 else None
-        effective_beam_max_height_cm = None
+
     elif beam_material == "timber":
         beam_max_height_cm = st.number_input(
             "H max travi",
@@ -523,7 +607,7 @@ else:
             key=form_key("sys_hmax_cm"),
         )
         effective_beam_max_height_cm = beam_max_height_cm if beam_max_height_cm > 0 else None
-        effective_beam_max_height_mm = None
+
     else:
         beam_max_height_cm = st.number_input(
             "H max travi",
@@ -534,7 +618,6 @@ else:
             key=form_key("sys_hmax_concrete_cm"),
         )
         effective_beam_max_height_cm = beam_max_height_cm if beam_max_height_cm > 0 else None
-        effective_beam_max_height_mm = None
 
     column_max_section_cm = st.number_input(
         "Sez. pil.",
@@ -589,13 +672,13 @@ else:
                     "Travi lunghe": (
                         f"{result.long_beams.section_name} · "
                         f"{result.long_beams.dimensions_label} · "
-                        f"{result.long_beams.line_load_kN_m if hasattr(result.long_beams, 'line_load_kN_m') else result.long_beams.adopted_line_load_kN_m:.2f} kN/m · "
+                        f"{result.long_beams.adopted_line_load_kN_m:.2f} kN/m · "
                         f"{result.long_beams.status}"
                     ),
                     "Travi corte": (
                         f"{result.short_beams.section_name} · "
                         f"{result.short_beams.dimensions_label} · "
-                        f"{result.short_beams.line_load_kN_m if hasattr(result.short_beams, 'line_load_kN_m') else result.short_beams.adopted_line_load_kN_m:.2f} kN/m · "
+                        f"{result.short_beams.adopted_line_load_kN_m:.2f} kN/m · "
                         f"{result.short_beams.status}"
                     ),
                     "Pilastri sistema": (
