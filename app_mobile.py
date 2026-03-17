@@ -60,7 +60,7 @@ def get_mobile_suggestion(mode: str, material: str, status_family: str, reason: 
                 return "Valutare sezione più alta."
             return "Procedere a verifica successiva."
 
-    if mode == "Sistema rapido":
+    if mode == "Sistema":
         if material == "Acciaio":
             if "limite geometrico" in text:
                 return "Rivedere luci o H travi."
@@ -192,15 +192,17 @@ if mode == "Trave":
             st.rerun()
 
     beam_usage_options = ["residential", "balcony", "roof_walkable", "roof_not_walkable", "light_vehicle"]
-    beam_usage_index = beam_usage_options.index(st.session_state.beam_usage_key)
+    usage_key = st.session_state.beam_usage_key
 
-    usage_key = st.selectbox(
-        "Uso",
-        beam_usage_options,
-        index=beam_usage_index,
-        format_func=lambda key: ALL_USAGE_LABELS[key],
-        key=form_key("beam_usage"),
-    )
+    with st.expander("Opzioni avanzate"):
+        beam_usage_index = beam_usage_options.index(st.session_state.beam_usage_key)
+        usage_key = st.selectbox(
+            "Uso",
+            beam_usage_options,
+            index=beam_usage_index,
+            format_func=lambda key: ALL_USAGE_LABELS[key],
+            key=form_key("beam_usage"),
+        )
 
     load_mode_label = st.radio(
         "Carico",
@@ -408,30 +410,33 @@ else:
             st.rerun()
 
     usage_options = ["residential", "balcony", "roof_walkable", "roof_not_walkable", "light_vehicle"]
-    usage_index = usage_options.index(st.session_state.preset_usage_key)
+    usage_key = st.session_state.preset_usage_key
+    floor_type = st.session_state.preset_floor_type
 
-    usage_key = st.selectbox(
-        "Uso",
-        usage_options,
-        index=usage_index,
-        format_func=lambda key: ALL_USAGE_LABELS[key],
-        key=form_key("sys_usage"),
-    )
+    with st.expander("Opzioni avanzate"):
+        usage_index = usage_options.index(st.session_state.preset_usage_key)
+        usage_key = st.selectbox(
+            "Uso",
+            usage_options,
+            index=usage_index,
+            format_func=lambda key: ALL_USAGE_LABELS[key],
+            key=form_key("sys_usage"),
+        )
 
-    floor_type_index_map = {"manual": 0, "timber": 1, "concrete": 2}
-    floor_type_label = st.selectbox(
-        "Piano",
-        ["Manuale", "Legno", "CA"],
-        index=floor_type_index_map[st.session_state.preset_floor_type],
-        key=form_key("sys_floor"),
-    )
+        floor_type_index_map = {"manual": 0, "timber": 1, "concrete": 2}
+        floor_type_label = st.selectbox(
+            "Piano",
+            ["Manuale", "Legno", "CA"],
+            index=floor_type_index_map[st.session_state.preset_floor_type],
+            key=form_key("sys_floor"),
+        )
 
-    if floor_type_label == "Manuale":
-        floor_type = "manual"
-    elif floor_type_label == "Legno":
-        floor_type = "timber"
-    else:
-        floor_type = "concrete"
+        if floor_type_label == "Manuale":
+            floor_type = "manual"
+        elif floor_type_label == "Legno":
+            floor_type = "timber"
+        else:
+            floor_type = "concrete"
 
     beam_material_label = st.selectbox(
         "Travi",
@@ -538,7 +543,7 @@ else:
 
             status_family = classify_status_family(result.status, result.note, result.warnings)
             reason = infer_governing_reason(result.status, result.note, result.warnings)
-            action = get_mobile_suggestion("Sistema rapido", result.beam_material_label, status_family, reason)
+            action = get_mobile_suggestion("Sistema", result.beam_material_label, status_family, reason)
 
             st.session_state.mobile_last_result = {
                 "title": "Sistema rapido",
