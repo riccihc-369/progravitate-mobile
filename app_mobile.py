@@ -61,18 +61,11 @@ def get_mobile_suggestion(mode: str, material: str, status_family: str, reason: 
             return "Procedere a verifica successiva."
 
     if mode == "Sistema":
-        if material == "Acciaio":
-            if "limite geometrico" in text:
-                return "Rivedere luci o H travi."
-            if "da verificare" in text:
-                return "Approfondire nodi e deformabilità."
-            return "Sistema coerente per studio rapido."
-        if material == "Legno":
-            if "limite geometrico" in text:
-                return "Rivedere luci o H travi."
-            if "da verificare" in text:
-                return "Approfondire appoggi e deformabilità."
-            return "Sistema coerente per studio rapido."
+        if "non compatibile" in text:
+            return "Rivedere geometria e materiali."
+        if "da verificare" in text:
+            return "Approfondire il predimensionamento del sistema."
+        return "Sistema coerente per studio rapido."
 
     return "Verificare con maggior dettaglio."
 
@@ -440,13 +433,30 @@ else:
 
     beam_material_label = st.selectbox(
         "Travi",
-        ["Acciaio", "Legno"],
+        ["Acciaio", "Legno", "Calcestruzzo armato"],
         key=form_key("sys_beam_mat"),
     )
-    beam_material = "steel" if beam_material_label == "Acciaio" else "timber"
+    if beam_material_label == "Acciaio":
+        beam_material = "steel"
+    elif beam_material_label == "Legno":
+        beam_material = "timber"
+    else:
+        beam_material = "concrete"
+
+    column_material_label = st.selectbox(
+        "Pilastri",
+        ["Calcestruzzo armato", "Acciaio", "Legno"],
+        key=form_key("sys_col_mat"),
+    )
+    if column_material_label == "Acciaio":
+        column_material = "steel"
+    elif column_material_label == "Legno":
+        column_material = "timber"
+    else:
+        column_material = "concrete"
 
     length_m = st.number_input(
-        "Lung.",
+        "Lungh.",
         min_value=0.1,
         value=float(st.session_state.preset_length_m),
         step=0.10,
@@ -503,7 +513,7 @@ else:
         )
         effective_beam_max_height_mm = beam_max_height_mm if beam_max_height_mm > 0 else None
         effective_beam_max_height_cm = None
-    else:
+    elif beam_material == "timber":
         beam_max_height_cm = st.number_input(
             "H max travi",
             min_value=0.0,
@@ -511,6 +521,17 @@ else:
             step=2.0,
             format="%.0f",
             key=form_key("sys_hmax_cm"),
+        )
+        effective_beam_max_height_cm = beam_max_height_cm if beam_max_height_cm > 0 else None
+        effective_beam_max_height_mm = None
+    else:
+        beam_max_height_cm = st.number_input(
+            "H max travi",
+            min_value=0.0,
+            value=60.0,
+            step=5.0,
+            format="%.0f",
+            key=form_key("sys_hmax_concrete_cm"),
         )
         effective_beam_max_height_cm = beam_max_height_cm if beam_max_height_cm > 0 else None
         effective_beam_max_height_mm = None
@@ -535,6 +556,7 @@ else:
                     slab_dead_load_kN_m2=slab_dead_load_kN_m2,
                     usage_key=usage_key,
                     beam_material=beam_material,
+                    column_material=column_material,
                     beam_max_height_mm=effective_beam_max_height_mm,
                     beam_max_height_cm=effective_beam_max_height_cm,
                     column_max_section_cm=effective_column_max_section_cm,
@@ -551,7 +573,7 @@ else:
                 "soluzione": (
                     f"L {result.long_beams.section_name} · "
                     f"C {result.short_beams.section_name} · "
-                    f"P {result.columns.section_width_cm}x{result.columns.section_depth_cm}"
+                    f"P {result.columns.section_name}"
                 ),
                 "motivo": reason,
                 "azione": action,
@@ -561,11 +583,27 @@ else:
                     "Sup.": f"{result.area_m2:.2f} m²",
                     "Piano": result.floor_label,
                     "Travi": result.beam_material_label,
+                    "Pilastri": result.column_material_label,
                     "Q tot": f"{result.total_surface_load_kN_m2:.2f} kN/m²",
                     "Q sist": f"{result.total_load_kN:.2f} kN",
-                    "Travi lunghe": f"{result.long_beams.section_name} · {result.long_beams.span_m:.2f} m · {result.long_beams.line_load_kN_m:.2f} kN/m · {result.long_beams.status}",
-                    "Travi corte": f"{result.short_beams.section_name} · {result.short_beams.span_m:.2f} m · {result.short_beams.line_load_kN_m:.2f} kN/m · {result.short_beams.status}",
-                    "Pilastri": f"{result.columns.section_width_cm} x {result.columns.section_depth_cm} cm · {result.columns.axial_load_per_column_kN:.2f} kN · {result.columns.status}",
+                    "Travi lunghe": (
+                        f"{result.long_beams.section_name} · "
+                        f"{result.long_beams.dimensions_label} · "
+                        f"{result.long_beams.line_load_kN_m if hasattr(result.long_beams, 'line_load_kN_m') else result.long_beams.adopted_line_load_kN_m:.2f} kN/m · "
+                        f"{result.long_beams.status}"
+                    ),
+                    "Travi corte": (
+                        f"{result.short_beams.section_name} · "
+                        f"{result.short_beams.dimensions_label} · "
+                        f"{result.short_beams.line_load_kN_m if hasattr(result.short_beams, 'line_load_kN_m') else result.short_beams.adopted_line_load_kN_m:.2f} kN/m · "
+                        f"{result.short_beams.status}"
+                    ),
+                    "Pilastri sistema": (
+                        f"{result.columns.section_name} · "
+                        f"{result.columns.dimensions_label} · "
+                        f"{result.columns.axial_load_per_column_kN:.2f} kN · "
+                        f"{result.columns.status}"
+                    ),
                     "Nota": result.note,
                     "Warnings": result.warnings,
                 },
